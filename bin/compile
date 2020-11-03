@@ -1,0 +1,85 @@
+#!/bin/sh
+# bin/compile <build-dir> <cache-dir> <env-dir>
+set -e
+
+BUILD_DIR=$1
+CACHE_DIR=$2
+ENV_DIR=$3
+
+# Default Hugo version
+DEFAULT_HUGO_VERSION="0.58.2"
+
+# attempt to extract the HUGO_VERSION parameter form the Heroku configuration vars, fall back to the default version if unavailable
+if [ -d "$ENV_DIR" -a -e "$ENV_DIR/HUGO_VERSION" ]; then
+  export HUGO_VERSION=$(cat "$ENV_DIR/HUGO_VERSION")
+else
+  echo "\n-----> HUGO VERSION not defined, using $DEFAULT_HUGO_VERSION."
+  export HUGO_VERSION=$DEFAULT_HUGO_VERSION
+fi
+
+# Hugo URL ( download from GH builds )
+RELEASE_NAME=hugo_${HUGO_VERSION}_Linux-64bit
+FILE_NAME=${RELEASE_NAME}.tar.gz
+HUGO_PACKAGE=https://github.com/gohugoio/hugo/releases/download/v${HUGO_VERSION}/${FILE_NAME}
+
+# Store the hugo package in the cache_dir ( persistent across builds )
+mkdir -p $CACHE_DIR
+if ! [ -e $CACHE_DIR/$FILE_NAME ]; then
+  echo "\n-----> Fetching Hugo ${HUGO_VERSION} binaries at ${HUGO_PACKAGE}"
+  curl $HUGO_PACKAGE -L -s -o $CACHE_DIR/$FILE_NAME
+fi
+
+# Extract the binary in the working directory
+echo "\n-----> Extracting Hugo ${HUGO_VERSION} binaries to ${BUILD_DIR}"
+mkdir -p $CACHE_DIR/$RELEASE_NAME
+tar -zxvf $CACHE_DIR/$FILE_NAME -C $CACHE_DIR
+mv $CACHE_DIR/hugo $BUILD_DIR/hugo
+
+# Export all of the user's ENV vars into this environment
+# See docs for what's going on here:
+#   https://devcenter.heroku.com/articles/buildpack-api
+# tl;dr, heroku only shows the dyno's config vars as files, not on the env
+# themselves
+echo "\n-----> Exporting ENV files in $ENV_DIR into the environment"
+export_env_dir() {
+  env_dir=$1
+  whitelist_regex=${2:-''}
+  blacklist_regex=${3:-'^(PATH|GIT_DIR|CPATH|CPPATH|LD_PRELOAD|LIBRARY_PATH)$'}
+  if [ -d "$env_dir" ]; then
+    for e in $(ls $env_dir); do
+      echo "$e" | grep -E "$whitelist_regex" | grep -qvE "$blacklist_regex" &&
+      export "$e=$(cat $env_dir/$e)"
+      :
+    done
+  fi
+}
+export_env_dir $ENV_DIR
+
+# if the user has a script/pre-hugo-build script, run that
+PRE_BUILD_SCRIPT="$BUILD_DIR/script/pre-hugo-build"
+if [ -x "$PRE_BUILD_SCRIPT" ]; then
+  echo "\n-----> Running pre-build script: $PRE_BUILD_SCRIPT"
+  $PRE_BUILD_SCRIPT "$BUILD_DIR" "$CACHE_DIR" "$ENV_DIR"
+fi
+
+# Fetch a theme specified in the .hugotheme file
+if [ -e $BUILD_DIR/.hugotheme ]; then
+  echo "\n-----> Getting the theme"
+  THEME_URL="`cat $BUILD_DIR/.hugotheme`"
+  rm -rf $BUILD_DIR/themes && mkdir $BUILD_DIR/themes && cd $BUILD_DIR/themes
+  git clone $THEME_URL
+fi
+
+# Build the site
+echo "\n-----> Building the site"
+cd $BUILD_DIR
+mkdir -p static
+./hugo --cleanDestinationDir --ignoreCache
+
+# if the user has a script/post-hugo-build script, run that
+POST_BUILD_SCRIPT="$BUILD_DIR/script/post-hugo-build"
+if [ -x "$POST_BUILD_SCRIPT" ]; then
+  echo "\n-----> Running post-build script: $POST_BUILD_SCRIPT"
+  $POST_BUILD_SCRIPT "$BUILD_DIR" "$CACHE_DIR" "$ENV_DIR"
+fi
+
