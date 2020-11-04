@@ -1,9 +1,7 @@
 **[🍴 Fork Alert 🍴]**
 
 This is a slightly-modified fork of [@roperzh's Hugo
-buildpack](https://github.com/roperzh/heroku-buildpack-hugo). We have made a
-few changes and additions to suit our static content needs at [Test
-Double](https://testdouble.com).
+buildpack](https://github.com/roperzh/heroku-buildpack-hugo). With few changes.
 
 * Any build failures will now cause the script to exit with a non-zero status,
   which in turn will cause Heroku to recognize that the build has failed and
