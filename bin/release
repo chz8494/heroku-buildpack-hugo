@@ -11,8 +11,11 @@
 #  $ heroku buildpacks:add https://github.com/heroku/heroku-buildpack-static.git
 #
 
-cat << EOF
----
-default_process_types:
-  web: "cd public && python -m SimpleHTTPServer \$PORT"
-EOF
+#!/usr/bin/env bash
+# bin/release <build-dir>
+
+cd $(dirname $0)
+cd ..
+git submodule init
+git submodule update
+heroku-buildpack-static/bin/release $1
